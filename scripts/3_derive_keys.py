@@ -12,13 +12,19 @@ import hmac
 import json
 import os
 import struct
-import sys
+
+from win_dacl import secure_directory, secure_write_text
+from workflow_common import (
+    WorkflowConfigError,
+    require_windows_x64,
+    resolve_db_dir,
+    resolve_secrets_dir,
+)
 
 # ═══════════════════ CONFIG ═══════════════════
-DB_DIR   = os.environ.get("WX_DB_DIR", r"D:\xwechat_files\<你的wxid目录>\db_storage")
-BASE     = os.path.dirname(os.path.abspath(__file__))
-KEY_FILE = os.path.join(BASE, "..", "secrets", "passphrase.txt")
-OUT_FILE = os.path.join(BASE, "..", "secrets", "all_keys.json")
+DB_DIR = ""
+KEY_FILE = ""
+OUT_FILE = ""
 # ═════════════════════════════════════════════
 
 PAGE_SIZE = 4096
@@ -41,29 +47,27 @@ def verify(enc_key, page1):
     return hmac.compare_digest(m.digest(), page1[de:de + HMAC_SIZE])
 
 
-def derive_all(secret: bytes, is_passphrase: bool):
+def derive_all(secret: bytes, db_dir: str):
     result = {}
     ok = fail = 0
-    for root, dirs, files in os.walk(DB_DIR):
-        for name in files:
-            if not name.endswith(".db"):
+    for root, dirs, files in os.walk(db_dir):
+        dirs.sort()
+        for name in sorted(files):
+            if not name.casefold().endswith(".db"):
                 continue
             p = os.path.join(root, name)
             try:
                 with open(p, 'rb') as f:
                     page1 = f.read(PAGE_SIZE)
             except OSError:
+                fail += 1
+                print(f"  FAIL {os.path.relpath(p, db_dir).replace(os.sep, '/')} (无法读取)")
                 continue
             if len(page1) < PAGE_SIZE or page1[:15] == b"SQLite format 3":
                 continue
-            rel = os.path.relpath(p, DB_DIR)
+            rel = os.path.relpath(p, db_dir).replace("\\", "/")
             salt = page1[:SALT_SIZE]
-            if is_passphrase:
-                # Way A: passphrase → 逐库派生
-                enc_key = hashlib.pbkdf2_hmac('sha512', secret, salt, ROUNDS, dklen=32)
-            else:
-                # Way B: secret 本身就是 enc_key (4.0 形态), 不再二次派生
-                enc_key = secret
+            enc_key = hashlib.pbkdf2_hmac('sha512', secret, salt, ROUNDS, dklen=32)
             if verify(enc_key, page1):
                 result[rel] = {
                     "enc_key": enc_key.hex(),
@@ -71,51 +75,79 @@ def derive_all(secret: bytes, is_passphrase: bool):
                     "size_mb": round(os.path.getsize(p) / 1048576, 1),
                 }
                 ok += 1
-                print(f"  OK   {rel}  key={enc_key.hex()[:8]}...")
+                print(f"  OK   {rel}")
             else:
                 fail += 1
                 print(f"  FAIL {rel}")
     return result, ok, fail
 
 
-def main():
-    # 隐私: 不再支持命令行传入密钥 (会进入 shell 历史); 只从文件读取
-    if not os.path.exists(KEY_FILE):
-        sys.exit(f"密钥文件不存在: {KEY_FILE}\n先运行 2_extract_passphrase.py")
-    raw = open(KEY_FILE).read().strip()
-    # ② 输出格式: "kind:hex" (kind ∈ passphrase|enckey); 兼容裸 hex (视为 passphrase)
+def load_passphrase(path: str) -> bytes:
+    try:
+        with open(path, encoding="ascii") as handle:
+            raw = handle.read().strip()
+    except OSError as exc:
+        raise WorkflowConfigError("passphrase 文件无法读取") from exc
     if ":" in raw:
         kind, hexpart = raw.split(":", 1)
-        secret = bytes.fromhex(hexpart.strip())
-        is_passphrase = (kind.strip() == "passphrase")
+        if kind.strip() != "passphrase":
+            raise WorkflowConfigError(
+                "仅支持 4.1.8+ passphrase；旧版 enckey 不能生成完整的逐库密钥表")
     else:
-        secret = bytes.fromhex(raw)
-        is_passphrase = True
+        hexpart = raw
+    try:
+        secret = bytes.fromhex(hexpart.strip())
+    except ValueError as exc:
+        raise WorkflowConfigError("passphrase 文件不是有效十六进制格式") from exc
+    if len(secret) != 32:
+        raise WorkflowConfigError(f"passphrase 长度为 {len(secret)} 字节，预期 32 字节")
+    return secret
 
-    result, ok, fail = derive_all(secret, is_passphrase)
+
+def main():
+    global DB_DIR, KEY_FILE, OUT_FILE
+    try:
+        require_windows_x64()
+        DB_DIR = os.fspath(resolve_db_dir())
+        secrets_dir = resolve_secrets_dir(create=True)
+        secure_directory(secrets_dir)
+        KEY_FILE = os.fspath(secrets_dir / "passphrase.txt")
+        OUT_FILE = os.fspath(secrets_dir / "all_keys.json")
+    except (WorkflowConfigError, RuntimeError) as exc:
+        print(f"[!] 环境未准备好: {exc}")
+        print("    先运行: python scripts/0_preflight.py")
+        return 2
+
+    # 隐私: 不再支持命令行传入密钥 (会进入 shell 历史); 只从文件读取
+    if not os.path.exists(KEY_FILE):
+        print("[!] 敏感输出目录/passphrase.txt 不存在\n    先运行 2_extract_passphrase.py")
+        return 1
+    try:
+        secret = load_passphrase(KEY_FILE)
+    except WorkflowConfigError as exc:
+        print(f"[!] {exc}")
+        return 1
+
+    result, ok, fail = derive_all(secret, DB_DIR)
     print(f"\n{ok} OK / {fail} FAIL")
     if not result:
-        sys.exit("[!] 全部失败 — 密钥不正确或 DB_DIR 配置错误")
+        print("[!] 全部失败 — passphrase 不正确或 WX_DB_DIR 配置错误")
+        return 3
+    if fail:
+        print("[!] 存在未验证数据库，拒绝写出不完整 all_keys.json")
+        return 4
 
-    os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
-    with open(OUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
-    try:
-        os.chmod(OUT_FILE, 0o600)
-    except OSError:
-        pass
-    print(f"已写入 {OUT_FILE}")
+    payload = json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    secure_write_text(OUT_FILE, payload)
+    print("已写入敏感输出目录/all_keys.json")
 
-    print(f"""
-下一步 (接入 wechat-cli):
-  1. pip install -e <wechat-cli 源码路径>
-  2. mkdir %USERPROFILE%\\.wechat-cli  (已存在则跳过)
-  3. 复制 {OUT_FILE} → %USERPROFILE%\\.wechat-cli\\all_keys.json
-  4. 写入 %USERPROFILE%\\.wechat-cli\\config.json:
-     {{"db_dir": "{DB_DIR}"}}
-  5. wechat-cli sessions / history "联系人备注" / export ...
-""")
+    print("\n下一步 (可选，接入 wechat-cli):")
+    print("  1. 按 README 的固定提交安装 wechat-cli")
+    print("  2. python scripts/4_configure_wechat_cli.py  # 只预演")
+    print("  3. python scripts/4_configure_wechat_cli.py --apply")
+    print("  4. wechat-cli sessions")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

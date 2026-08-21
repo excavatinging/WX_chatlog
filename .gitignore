@@ -18,21 +18,48 @@ exports/
 # ══ 导出数据 (仅允许项目文档的 md) ══
 /*.md
 !README.md
+!AGENTS.md
 docs/*.md
 !docs/how-it-works.md
 *.txt
 !requirements.txt
 *.html
 *.csv
+*.bak
+*.zip
+*.7z
+*.tar
+*.gz
+*.pem
+*.key
+*.p12
+*.pfx
+*.kdbx
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.pdf
 
 # ══ Python ══
 __pycache__/
 *.pyc
 .venv/
 venv/
+.pytest_cache/
+.coverage
 
 # ══ IDE / OS ══
 .vscode/
 .idea/
 Thumbs.db
 .DS_Store
+
+# ══ 本地审计与临时产物 ══
+.gstack/
+/Temp/

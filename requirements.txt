@@ -1,5 +1,5 @@
-# Steps 1-2: stdlib only. Below are for step 3 / selftest / anchor locator.
-pycryptodome>=3.20
+# Steps 1-4 use stdlib only. Below are for offline selftest / version adaptation.
+pycryptodome==3.23.0
 # find_kdf_anchor.py (only needed when adapting to a new WeChat version)
-capstone>=5.0
-# Query/export layer (external project): pip install -e <wechat-cli source>
+capstone==5.0.9
+# Optional downstream query layer is installed separately: python -m pip install wechat-cli

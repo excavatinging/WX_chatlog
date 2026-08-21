@@ -2,17 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 加密参数自检: 用随机 passphrase 人工构造一个加密页, 验证派生/验证/解密全链路正确。
-不依赖任何微信数据 — 用于确认算法实现与微信 4.1.x 一致。
+不依赖任何微信数据 — 验证的是本仓库算法实现的内部一致性。
 
 用法: python selftest_crypto.py
-全部输出 OK 即实现正确。
+退出码 0 = 全部通过; 1 = 有失败项 (python -O 下同样有效, 不依赖 assert)。
 """
 import hashlib
 import hmac
 import os
 import struct
+import sys
 
-from Crypto.Cipher import AES   # pip install pycryptodome
+# Crypto 命名空间由 requirements 中受维护的 pycryptodome 提供，不是已废弃的 PyCrypto。
+from Crypto.Cipher import AES  # nosec B413
 
 KEY_SIZE = 32
 PAGE_SIZE = 4096
@@ -30,15 +32,16 @@ def derive(passphrase: bytes, salt: bytes):
     return enc_key, mac_key
 
 
-def page_hmac(mac_key, page_tail: bytes, page_no: int) -> bytes:
-    """page_tail = 密文+iv 区 (salt 后到 reserve+iv 前的部分按实现拼接)"""
-    m = hmac.new(mac_key, digestmod=hashlib.sha512)
-    m.update(page_tail)
-    m.update(struct.pack('<I', page_no))   # 微信变体: 小端页号
-    return m.digest()
+def main() -> int:
+    failures = []
 
+    def check(name: str, cond: bool, detail: str = ""):
+        if cond:
+            print(f"[OK] {name}")
+        else:
+            print(f"[FAIL] {name} {detail}")
+            failures.append(name)
 
-def main():
     passphrase = os.urandom(32)
     salt = os.urandom(16)
     plaintext = os.urandom(PAGE_SIZE)
@@ -62,35 +65,37 @@ def main():
     page[PAGE_SIZE - HMAC_SIZE:] = m.digest()
     page = bytes(page)
 
-    # ── 验证1: 验证器识别正确密钥 ──
+    # ── 验证1: 验证器识别正确密钥 / 拒绝错误密钥 ──
     def verify(cand_pass):
-        ek, mk = derive(cand_pass, page[:SALT_SIZE])
+        _, mk = derive(cand_pass, page[:SALT_SIZE])
         mm = hmac.new(mk, digestmod=hashlib.sha512)
         mm.update(page[SALT_SIZE:PAGE_SIZE - RESERVE + IV_SIZE])
         mm.update(struct.pack('<I', 1))
         return hmac.compare_digest(mm.digest(), page[PAGE_SIZE - HMAC_SIZE:])
 
-    assert verify(passphrase), "正确 passphrase 未通过验证"
-    assert not verify(os.urandom(32)), "随机 passphrase 不应通过"
-    print("[OK] 1/3 验证器: 正确密钥通过 / 错误密钥拒绝")
+    check("1/3 验证器: 正确密钥通过", verify(passphrase))
+    check("1/3 验证器: 错误密钥拒绝", not verify(os.urandom(32)))
 
-    # ── 验证2: enc_key 直接作为候选 (Way B 路径) ──
+    # ── 验证2: 已派生 enc_key 的首页快验 ──
     mk2 = hashlib.pbkdf2_hmac('sha512', enc_key, bytes(b ^ 0x3a for b in salt), 2, dklen=32)
     mm = hmac.new(mk2, digestmod=hashlib.sha512)
     mm.update(page[SALT_SIZE:PAGE_SIZE - RESERVE + IV_SIZE])
     mm.update(struct.pack('<I', 1))
-    assert hmac.compare_digest(mm.digest(), page[PAGE_SIZE - HMAC_SIZE:])
-    print("[OK] 2/3 Way B: 已派生 enc_key 可被快验识别")
+    check("2/3 enc_key 快验: 已派生密钥可被识别",
+          hmac.compare_digest(mm.digest(), page[PAGE_SIZE - HMAC_SIZE:]))
 
     # ── 验证3: 完整解密 roundtrip ──
     dec = AES.new(enc_key, AES.MODE_CBC, page[PAGE_SIZE - RESERVE:PAGE_SIZE - RESERVE + IV_SIZE])
     body2 = dec.decrypt(page[SALT_SIZE:PAGE_SIZE - RESERVE])
-    assert body2 == body, "解密结果与原文不一致"
-    print("[OK] 3/3 解密 roundtrip: 密文可完整还原")
+    check("3/3 解密 roundtrip: 密文可完整还原", body2 == body)
 
-    print("\n全部通过 — 加密参数实现与微信 4.1.x SQLCipher 变体一致:")
+    if failures:
+        print(f"\n[!] {len(failures)} 项失败 — 实现与预期不符, 退出码 1", flush=True)
+        return 1
+    print("\n全部通过 — 本仓库加密实现的内部一致性验证通过:")
     print(f"  PBKDF2-HMAC-SHA512 x{ROUNDS}, AES-256-CBC, page={PAGE_SIZE}, reserve={RESERVE}, 页号小端")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
