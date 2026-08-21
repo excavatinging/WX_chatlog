@@ -1,8 +1,8 @@
 # 技术原理
 
-## 微信 4.1.x 数据库加密体系
+## 微信 4.1.x 本地数据库加密体系
 
-微信 4.x 将聊天记录存储为 SQLCipher 变体加密的 SQLite 数据库（`xwechat_files/<wxid>/db_storage/**/*.db`）：
+微信 4.x 将本地数据存储为 SQLCipher 变体加密的 SQLite 数据库（`xwechat_files/<wxid>/db_storage/**/*.db`）：
 
 ```
 salt     = db 文件前 16 字节（每个库随机生成）
@@ -26,6 +26,8 @@ mac_key  = PBKDF2-HMAC-SHA512(enc_key, salt ^ 0x3a, 2, dklen=32)
 ## 本项目方案：断点捕获 + 派生验证
 
 ### ① 断点捕获（1_capture_launch.py）
+
+> 提示：本节出现的路径/数值（如 PID、命中次数、转储量）为某次实测记录，仅作规模参考，不同环境会有差异。
 
 **锚点定位**：无符号表条件下，用 PBKDF2 迭代次数 `256000/0x3E800` 作为立即数锚点。在 183MB 的 `.text` 段中，该常量出现约百次，但"作为函数参数装载"（`mov edx, 0x3E800; call ...`）的调用点极少（实测仅 2 处）。被调函数即 SQLCipher 的 `kdf_iter` setter——每个数据库初始化的必经之路。
 
@@ -56,11 +58,11 @@ Way B (4.0 兼容):    候选本身即 enc_key → PBKDF2(候选, mac_salt, 2) �
 
 ### ③ 密钥派生（3_derive_keys.py）
 
-拿到 passphrase 后，对每个库用自己的 salt 派生 `enc_key`，逐库 HMAC 验证（应 100% 通过），输出 wechat-cli 格式的 `all_keys.json`。之后的查询/解密/导出交给 wechat-cli（其查询层兼容 4.1.12，仅密钥提取环节失效）。
+拿到 passphrase 后，对每个库用自己的 salt 派生 `enc_key`，逐库 HMAC 验证（应 100% 通过），输出 wechat-cli 格式的 `all_keys.json`。之后的查询/解密交给 wechat-cli（其查询层兼容 4.1.x，仅密钥初始化环节不适用于新版）。
 
 ## 为什么不直接 Hook 函数参数
 
-理论上断在 `set_pass(ctx, key, len)` 上可直接读 RDX 拿到 passphrase（wx_key 系工具的 DLL 注入做法）。但静态分析无法可靠区分 setter 函数（代码模式相似者众多，实测某"3 参数 + 写 rcx 字段"候选并非登录路径）；而 `kdf_iter` setter 有 256000 这个不变常量做锚点，跨版本稳定。捕获 kdf 上下文后，passphrase 就存在其可达内存中（set_pass 先于 set_kdf_iter 调用），事后派生验证即可命中——虽然多花 45 分钟计算，但锚点可靠性高得多。
+理论上断在密钥设置函数上可直接读寄存器拿到材料（DLL 注入类工具的做法）。但静态分析无法可靠区分 setter 函数（代码模式相似者众多，实测某"3 参数 + 写 rcx 字段"候选并非登录路径）；而 `kdf_iter` setter 有 256000 这个不变常量做锚点，跨版本稳定。捕获 kdf 上下文后，passphrase 就存在其可达内存中（密钥设置先于 kdf_iter 设置调用），事后派生验证即可命中——虽然多花几十分钟计算，但锚点可靠性高得多。
 
 ## 微信升级适配
 
@@ -74,5 +76,5 @@ Way B (4.0 兼容):    候选本身即 enc_key → PBKDF2(候选, mac_salt, 2) �
 ## 风险与边界
 
 - 断点导致微信卡顿/崩溃的理论风险：INT3 + 单步循环是调试器标准行为，实测（含多次登录、长时间挂着）无异常；且 `DebugSetProcessKillOnExit(False)` 保证调试器退出不杀微信
-- passphrase 可能随重新登录轮换：失效重跑三步即可（约 1 小时，其中 45 分钟无人值守）
+- passphrase 失效后重跑三步即可（约 1 小时，大部分无人值守；实测跨登录稳定）
 - 本方案读取的是本机已登录账号自己的数据；适用性与合法性由使用者自负

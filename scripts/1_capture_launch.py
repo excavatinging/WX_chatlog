@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-① 断点捕获: 以调试器模式启动微信, 在 SQLCipher kdf_iter setter 设 INT3 断点,
-   登录时每个数据库初始化都会命中, 转储 codec 上下文内存到 ctx_dumps/
+① 断点捕获: 以调试器模式启动目标程序, 在 SQLCipher kdf_iter setter 设 INT3 断点,
+   登录时每个数据库初始化都会命中, 转储 codec 上下文内存到 secrets/ctx_dumps/
 
 原理: Windows 官方调试 API (DebugActiveProcess/WaitForDebugEvent), 单字节 0xCC 断点,
       不注入任何可执行代码到目标进程。

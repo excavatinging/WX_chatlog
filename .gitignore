@@ -15,7 +15,7 @@ exports/
 .env
 .env.*
 
-# ══ 导出的聊天记录 (仅允许项目文档的 md) ══
+# ══ 导出数据 (仅允许项目文档的 md) ══
 /*.md
 !README.md
 docs/*.md

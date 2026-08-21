@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 ③ 密钥派生: 用 ② 的 passphrase 对每个加密库派生 enc_key 并验证,
-   输出 wechat-cli 兼容的 all_keys.json (可直接放入 ~/.wechat-cli/)
+   输出 wechat-cli 兼容的 all_keys.json
 
-用法: python 3_derive_keys.py [passphrase_hex]
-      (无参数时从 secrets/passphrase.txt 读取)
+用法: python 3_derive_keys.py   (从 secrets/passphrase.txt 读取)
 输出: secrets/all_keys.json
 """
 import hashlib
