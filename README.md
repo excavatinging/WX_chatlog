@@ -55,6 +55,15 @@ $env:WX_DB_DIR = "D:\xwechat_files\<你的wxid目录>\db_storage"   # ②③ 需
 
 `WX_DB_DIR` 即微信数据目录下以 `wxid_` 开头、后缀最长的那个文件夹里的 `db_storage`。
 
+bash（Git Bash / MSYS）写法：
+
+```bash
+export WX_EXE='D:\Apps\Weixin\Weixin.exe' WX_DIR='D:\Apps\Weixin'
+cd scripts && python -X utf8 1_capture_launch.py
+```
+
+注意环境变量与命令须在**同一条** shell 命令中设置并使用（每条 `!` 命令是独立 shell）。
+
 之后即可用 [wechat-cli](https://github.com/huohuoer/wechat-cli) 查询/导出（其查询层与 4.1.12 兼容，仅 init 提取环节失效，本项目即为其替代）：
 
 ```bash
