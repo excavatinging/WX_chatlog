@@ -1,0 +1,38 @@
+# ══ 敏感数据 — 绝不提交 ══
+secrets/
+all_keys.json
+passphrase.txt
+ctx_dumps/
+exports/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.dmp
+*.dump
+*.log
+.env
+.env.*
+
+# ══ 导出的聊天记录 (仅允许项目文档的 md) ══
+/*.md
+!README.md
+docs/*.md
+!docs/how-it-works.md
+*.txt
+!requirements.txt
+*.html
+*.csv
+
+# ══ Python ══
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ══ IDE / OS ══
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
