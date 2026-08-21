@@ -32,14 +32,28 @@ mac_key  = PBKDF2-HMAC-SHA512(enc_key, salt ^ 0x3a, 2, 32)
 
 ```bash
 # ① 断点捕获：以调试模式启动微信，登录后自动捕获并转储（数分钟）
+#    ⚠️ 运行前必须完全退出微信（托盘右键退出），断点须在数据库初始化前就位
 python scripts/1_capture_launch.py
 
 # ② passphrase 提取：对转储字节做 PBKDF2 派生验证（约 45 分钟，无人值守）
 python scripts/2_extract_passphrase.py
 
-# ③ 派生 22 个库密钥 → wechat-cli 格式 all_keys.json
+# ③ 派生全部库密钥 → wechat-cli 格式 all_keys.json
 python scripts/3_derive_keys.py
 ```
+
+### 路径配置（微信不在默认位置时必须设置）
+
+脚本默认假定微信安装在 `C:\Program Files\Tencent\Weixin`。若你的微信装在其他位置，
+通过环境变量覆盖（PowerShell 示例）：
+
+```powershell
+$env:WX_EXE   = "D:\Apps\Weixin\Weixin.exe"        # 微信主程序
+$env:WX_DIR   = "D:\Apps\Weixin"                    # 微信安装目录
+$env:WX_DB_DIR = "D:\xwechat_files\<你的wxid目录>\db_storage"   # ②③ 需要
+```
+
+`WX_DB_DIR` 即微信数据目录下以 `wxid_` 开头、后缀最长的那个文件夹里的 `db_storage`。
 
 之后即可用 [wechat-cli](https://github.com/huohuoer/wechat-cli) 查询/导出（其查询层与 4.1.12 兼容，仅 init 提取环节失效，本项目即为其替代）：
 
@@ -53,13 +67,13 @@ wechat-cli export "联系人备注" --format markdown --output chat.md --limit 1
 
 - Windows 10/11 x64，Python ≥ 3.10
 - 微信 Windows 版 4.1.8+（开发验证版本：4.1.12.26）
-- 依赖：`pip install pycryptodome`（第 ③ 步解密需要；①② 仅用标准库）
+- 依赖：`pip install -r requirements.txt`（①② 仅用标准库；③/selftest 需 pycryptodome，锚点定位需 capstone）
 
 ## 脚本说明
 
 | 脚本 | 作用 | 输入 → 输出 |
 |---|---|---|
-| `scripts/1_capture_launch.py` | 调试模式启动微信 + INT3 断点 + 内存转储 | 登录操作 → `ctx_dumps/*.json` |
+| `scripts/1_capture_launch.py` | 调试模式启动微信 + INT3 断点 + 内存转储 | 登录操作 → `secrets/ctx_dumps/*.json` |
 | `scripts/2_extract_passphrase.py` | 转储字节滑窗 × PBKDF2 派生 × HMAC 验证（单样本门控加速） | `ctx_dumps/` → `passphrase.txt` |
 | `scripts/3_derive_keys.py` | passphrase 派生全部库密钥并验证 → `all_keys.json` | `passphrase.txt` → `all_keys.json` |
 | `scripts/selftest_crypto.py` | 加密参数自检（合成数据 roundtrip） | 无依赖验证算法正确性 |
