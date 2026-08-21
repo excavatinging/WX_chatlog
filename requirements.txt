@@ -1,6 +1,5 @@
-# 步骤①②仅用标准库; 以下为③/selftest 需要
+# Steps 1-2: stdlib only. Below are for step 3 / selftest / anchor locator.
 pycryptodome>=3.20
-# find_kdf_anchor.py 需要 (仅微信升级适配时用)
+# find_kdf_anchor.py (only needed when adapting to a new WeChat version)
 capstone>=5.0
-# 查询导出层 (外部项目, 二选一: pip 安装或源码 -e 安装)
-# pip install wechat-cli  或  git clone https://github.com/huohuoer/wechat-cli
+# Query/export layer (external project): pip install -e <wechat-cli source>
